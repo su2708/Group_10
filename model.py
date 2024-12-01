@@ -86,7 +86,7 @@ if uploaded_files:
             tool = Tool(
                 name=name,
                 func=lambda query, df=df: df.query(query),
-                description=f"Analyze the {name} dataset."
+                description=f" {name} 데이터셋을 분석하고, 결과를 한국어로 답변하세요."
             )
             tools.append(tool)
 
