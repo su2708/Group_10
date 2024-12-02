@@ -1,10 +1,15 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from openai import OpenAI
+from dotenv import load_dotenv, dotenv_values
 import os
 
 # OpenAI API 키 설정
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+#load_dotenv()
+#OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+config = dotenv_values('.env')
+OPENAI_API_KEY = config.get('OPENAI_API_KEY')
 
 # OpenAI 초기화
 client = OpenAI(
