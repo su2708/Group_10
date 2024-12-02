@@ -86,11 +86,22 @@ if menu == "채팅":
                 st.markdown(question)
             history_manager.add_message("user", question, session_id)
 
+            # 기존 대화 이력 가져오기 (최대 20개의 메시지로 제한)
+            conversation_history = history_manager.get_messages(session_id, limit=20)
+            # 시간 순서대로 정렬
+            conversation_history = conversation_history[::-1]
+            
             # AI 응답 생성
             with st.chat_message("assistant"):
                 with st.spinner("Waiting for a response..."):
+                    # 대화 이력을 서버로 전송
+                    data = {
+                        "api_key": api_key,
+                        "conversation": [{"role": role, "content": content} for role, content, _ in conversation_history],
+                        "question": question
+                    }
                     # FastAPI 서버로 POST 요청
-                    response = requests.post(API_URL, json={"api_key": api_key, "question": question})
+                    response = requests.post(API_URL, json=data)
                     
                     if response.status_code == 200:
                         answer = response.json().get("answer", "No answer received.")

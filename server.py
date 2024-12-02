@@ -3,7 +3,8 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.vectorstores import FAISS
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List, Dict
 from fastapi import FastAPI
 from model import setup_vector_store, load_prompt
 import os
@@ -27,9 +28,10 @@ app = FastAPI()
 class QueryRequest(BaseModel):
     api_key: str
     question: str
+    conversation: List[Dict[str, str]] = Field(default_factory=list)  # default는 빈 배열 
 
-# 응답 생성 함수
-def generate_response(api_key, question):   
+# 응답 생성 함수: 기존 대화 내역을 포함해서 응답 생성 
+def generate_response(api_key, question, conversation):   
     llm = ChatOpenAI(
         model="gpt-4o",
         temperature=0.1,
@@ -50,18 +52,25 @@ def generate_response(api_key, question):
     context = context[:max_context_length]
     
     # 프롬프트 생성
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                f"{prompt_text[:1000]}\n\n아래는 리트리버에서 가져온 데이터입니다:\n{context}"
-            ),
-            ("human", "{question}"),
-        ]
-    )
+    messages = [
+        {
+            "role": "system",
+            "content": f"{prompt_text[:1000]}\n\n아래는 리트리버에서 가져온 데이터입니다:\n{context}"
+        }
+    ]
 
-    chain = {"question": RunnablePassthrough()} | prompt | llm
-    answer = chain.invoke(question).content
+    # 기존 대화 이력을 메시지에 추가
+    
+    # conversation의 모든 항목을 messages list의 끝에 추가
+    messages.extend(conversation)
+    print(messages)
+    # 현재 질문 추가
+    messages.append({"role": "user", "content": question})
+
+    # LLM에게 메시지 전달
+    response = llm(messages)
+
+    answer = response.content
 
     return answer
 
@@ -70,7 +79,8 @@ def generate_response(api_key, question):
 async def ask_question(request: QueryRequest):
     api_key = request.api_key
     question = request.question
-    answer = generate_response(api_key, question)
+    conversation = request.conversation
+    answer = generate_response(api_key, question, conversation)
     return {"question": question, "answer": answer}
 
 # 서버 실행
