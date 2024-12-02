@@ -4,18 +4,6 @@ from dotenv import load_dotenv, dotenv_values
 from openai import OpenAI
 import os
 
-# OpenAI API 키 설정
-#load_dotenv()
-#OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-# config = dotenv_values('.env')
-# OPENAI_API_KEY = config.get('OPENAI_API_KEY')
-
-# OpenAI 초기화
-# client = OpenAI(
-#     api_key=None,
-# )
-
 # FastAPI 앱 초기화
 app = FastAPI()
 
