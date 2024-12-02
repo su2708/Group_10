@@ -1,114 +1,182 @@
-"""
-LangChain Agent 이해하기 🤖
-1. Agent란 무엇인가요?
-Agent는 주어진 질문이나 작업을 해결하기 위해 다양한 도구(Tools)를 사용할 수 있는 '지능형 비서'라고 생각하면 됩니다. 마치 우리가 계산이 필요할 때 계산기를 사용하고, 정보가 필요할 때 인터넷을 검색하는 것처럼, Agent도 필요한 도구를 선택하고 사용하여 문제를 해결합니다.
-
-2. Agent의 주요 구성 요소 📦
-2.1 도구 (Tools)
-정의: Agent가 사용할 수 있는 다양한 기능들
-예시:
-Calculator: 수학 계산을 수행
-Wikipedia: 정보 검색을 수행
-그 외: 날씨 확인, 일정 관리, 이메일 전송 등
-2.2 LLM (Large Language Model)
-역할: Agent의 '두뇌'
-기능:
-질문 이해
-적절한 도구 선택
-결과 해석 및 답변 생성
-2.3 프롬프트 템플릿
-역할: Agent의 '행동 지침서'
-내용:
-사용 가능한 도구 목록
-도구 사용 규칙
-답변 형식
-3. Agent의 작동 프로세스 🔄
-3.1 기본 실행 사이클
-질문 → 도구 선택 → 도구 사용 → 결과 확인 → 최종 답변
-3.2 상세 프로세스 예시
-질문: "127*4 - 99는 얼마인가요?"
-
-질문 분석 📝
-
-"이것은 수학 계산이 필요한 질문이군요!"
-도구 선택 🛠
-
-Action: Calculator
-Action Input: 127*4 - 99
-도구 실행 및 관찰 👀
-
-Observation: 409
-최종 답변 생성 ✍️
-
-Final Answer: 계산 결과는 409입니다.
-"""
-
 import streamlit as st
-import pandas as pd
-from langchain_experimental.agents import create_csv_agent
-from langchain_community.llms import OpenAI
-from langchain.tools import Tool
-from langchain_community.chat_models import ChatOpenAI
-from dotenv import load_dotenv
+from utils import print_messages, StreamHandler
+from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.messages import ChatMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_openai import ChatOpenAI
+from langchain.vectorstores import FAISS
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.schema import Document
 import os
+import glob
+import json
+from dotenv import load_dotenv
 
-load_dotenv()
+# Streamlit 페이지 설정
+st.set_page_config(page_title="AI 창업 어시스턴트", page_icon="😎")
+st.title("😎AI 창업 어시스턴트😎")
 
-# OpenAI API Key 설정
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OpenAI API 키 가져오기
+OPENAI_API_KEY = ''
+os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
 
-# Streamlit에서 파일 업로드
-st.title("Multiple CSV Agent")
-uploaded_files = st.file_uploader("CSV 파일들을 업로드하세요", type=["csv"], accept_multiple_files=True)
+# Streamlit 세션 상태 초기화
+if "messages" not in st.session_state:
+    st.session_state["messages"] = []
+if "store" not in st.session_state:
+    st.session_state["store"] = dict()
 
-if uploaded_files:
-    # 모든 CSV 파일을 데이터프레임으로 로드
-    dataframes = {}
-    files_path = []  # csv 파일 경로
-    for uploaded_file in uploaded_files:
-        df = pd.read_csv(uploaded_file, on_bad_lines="skip")  # 열 크기가 맞지 않는 행은 무시
-        dataframes[uploaded_file.name] = df  # 
-        files_path.append(f"./files/jeju/{uploaded_file.name}")
-        st.write(f"{uploaded_file.name} 데이터 미리보기:")
-        st.dataframe(df)
+# 사이드바 설정
+with st.sidebar:
+    session_id = st.text_input("Session Id", value="sample_id")
+    clear_btn = st.button("대화기록 초기화")
+    if clear_btn:
+        st.session_state["messages"] = []
+        st.session_state["store"] = dict()
 
-    # 모든 CSV 데이터를 병합할 경우 (선택 사항)
-    combined_df = pd.concat(dataframes.values(), ignore_index=True)
+# 대화 기록 출력
+print_messages()
 
-    # 사용자 질문 입력
-    question = st.text_input("질문을 입력하세요:")
+# JSON 데이터 로드 함수
+def load_all_chunks(folder_path):
+    """Load pre-chunked JSON data from a specified folder."""
+    all_chunks = []
+    try:
+        for file_path in glob.glob(os.path.join(folder_path, "*.json")):
+            with open(file_path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+                if "content" in data:
+                    chunk = {"content": data["content"], "source": file_path}
+                    all_chunks.append(chunk)
+    except Exception as e:
+        st.error(f"JSON 파일 로드 중 오류 발생: {e}")
+    return all_chunks
 
-    if question:
-        # LangChain Agent 생성
-        tools = []
-        for name, df in dataframes.items():
-            # 각각의 CSV 파일을 하나의 Tool로 등록
-            tool = Tool(
-                name=name,
-                func=lambda query, df=df: df.query(query),
-                description=f" {name} 데이터셋을 분석하고, 결과를 한국어로 답변하세요."
-            )
-            tools.append(tool)
+# FAISS 벡터스토어 및 리트리버 설정 함수
+def setup_vector_store(data_folder, index_save_path, embedding_model="text-embedding-ada-002"):
+    """Set up FAISS vector store from pre-chunked data."""
+    os.makedirs(os.path.dirname(index_save_path), exist_ok=True)  # Ensure directory exists
 
-        # OpenAI LLM 초기화
-        llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0.1,
-            streaming=True,
-            openai_api_key = OPENAI_API_KEY,
+    # 문서 로드 및 변환
+    documents = []
+    for chunk in load_all_chunks(data_folder):
+        content = chunk.get("content", "")
+        metadata = {"source": chunk.get("source", "unknown")}
+        documents.append(Document(page_content=content, metadata=metadata))
+
+    if not documents:
+        raise ValueError("로드된 문서가 없습니다. 데이터 폴더를 확인하세요.")
+
+    # 임베딩 생성 및 FAISS 벡터스토어 구축
+    embeddings = OpenAIEmbeddings(model=embedding_model)
+    vectorstore = FAISS.from_documents(documents, embeddings)
+
+    # FAISS 벡터스토어 저장
+    vectorstore.save_local(index_save_path)
+    return vectorstore
+
+# FAISS 벡터스토어 및 리트리버 로드
+index_path = "data/vectorstore/faiss_index"
+chunks_folder = "data/chunks/"
+
+if "vectorstore" not in st.session_state:
+    # 최초 실행 시 인덱스 파일 확인 및 로드
+    faiss_file = f"{index_path}.faiss"
+    pkl_file = f"{index_path}.pkl"
+
+    if not (os.path.exists(faiss_file) and os.path.exists(pkl_file)):
+        st.info(f"FAISS 인덱스 파일이 없습니다. 새로 생성합니다: {index_path}")
+        st.session_state["vectorstore"] = setup_vector_store(chunks_folder, index_path)
+    else:
+        st.session_state["vectorstore"] = FAISS.load_local(index_path, OpenAIEmbeddings())
+
+retriever = st.session_state["vectorstore"].as_retriever(search_type="similarity", search_kwargs={"k": 5})
+
+# 프롬프트 데이터 로드 함수
+def load_prompt(file_path):
+    """Load the prompt text from a specified file."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            return file.read()
+    except Exception as e:
+        st.error(f"프롬프트 파일 로드 중 오류 발생: {e}")
+        return None
+
+# 프롬프트 데이터 로드
+prompt_path = "data/prompts/prompt.txt"
+prompt_text = load_prompt(prompt_path)
+if not prompt_text:
+    st.stop()
+
+# 세션 기록을 가져오는 함수
+def get_session_history(session_ids: str) -> BaseChatMessageHistory:
+    """Retrieve session history or initialize it if not available."""
+    if session_ids not in st.session_state["store"]:
+        st.session_state["store"][session_ids] = ChatMessageHistory()
+    return st.session_state["store"][session_ids]
+
+# 대화 기록 길이 제한 함수
+def truncate_messages(messages, max_tokens=6000):
+    """Truncate messages to fit within the maximum token limit."""
+    current_length = 0
+    truncated_messages = []
+    for message in reversed(messages):  # 최신 메시지부터 확인
+        message_length = len(message.content.split())  # message["content"] 대신 message.content
+        if current_length + message_length > max_tokens:
+            break
+        truncated_messages.insert(0, message)
+        current_length += message_length
+    return truncated_messages
+
+# 사용자 입력 처리
+if user_input := st.chat_input("궁금한 것을 입력하세요."):
+    # 리트리버에서 문서 검색
+    relevant_docs = retriever.get_relevant_documents(user_input)
+    context = "\n".join([doc.page_content for doc in relevant_docs])
+    max_context_length = 3000  # 검색된 문서의 최대 길이 제한
+    context = context[:max_context_length]
+
+    st.chat_message("user").write(user_input)
+    st.session_state["messages"].append(ChatMessage(role="user", content=user_input))
+
+    # AI 응답 생성
+    with st.chat_message("assistant"):
+        stream_handler = StreamHandler(st.empty())
+
+        # 모델 생성
+        llm = ChatOpenAI(model="gpt-4", streaming=True, callbacks=[stream_handler], max_tokens=500)
+
+        # 프롬프트 생성
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    f"{prompt_text[:1000]}\n\n아래는 리트리버에서 가져온 데이터입니다:\n{context}"
+                ),
+                MessagesPlaceholder(variable_name="history"),
+                ("human", "{question}"),
+            ]
         )
 
-        # Agent 생성 및 질문 실행
-        agent = create_csv_agent(
-            llm=llm,  # 모델 지정
-            path=files_path,  # csv 파일 경로들
-            pandas_kwargs={"on_bad_lines":"skip"},  # 열 크기가 맞지 않는 행은 무시
-            tools=tools,
-            verbose=True,
-            allow_dangerous_code=True,  # 보안 무시 (*로컬 컴퓨터에서만 실행!*)
+        # RunnableWithMessageHistory 설정
+        chain = prompt | llm
+        chain_with_memory = RunnableWithMessageHistory(
+            chain,
+            get_session_history,
+            input_messages_key="question",
+            history_messages_key="history",
         )
-        response = agent.run(question)
 
-        # 응답 출력
-        st.write("AI 응답:")
-        st.text(response)
+        # 대화 기록 제한
+        st.session_state["messages"] = truncate_messages(st.session_state["messages"])
+
+        # 사용자 입력 처리 및 AI 응답 생성
+        response = chain_with_memory.invoke(
+            {"question": user_input},
+            config={"configurable": {"session_id": session_id}},
+        )
+        st.session_state["messages"].append(
+            ChatMessage(role="assistant", content=response.content)
+        )
