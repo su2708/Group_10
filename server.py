@@ -1,20 +1,24 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from dotenv import load_dotenv, dotenv_values
-from openai import OpenAI
+from langchain_openai import ChatOpenAI
+from langchain.vectorstores import FAISS
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from model import setup_vector_store, load_prompt
 import os
 
-# OpenAI API 키 설정
-#load_dotenv()
-#OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# FAISS 벡터스토어와 전처리된 문서 위치
+index_path = "./data/vectorstore/faiss_index"
+chunks_folder = "./data/chunks/"
+faiss_file = f"{index_path}.faiss"
+pkl_file = f"{index_path}.pkl"
 
-# config = dotenv_values('.env')
-# OPENAI_API_KEY = config.get('OPENAI_API_KEY')
-
-# OpenAI 초기화
-# client = OpenAI(
-#     api_key=None,
-# )
+# 프롬프트 데이터 로드
+prompt_path = "data/prompts/prompt.txt"
+prompt_text = load_prompt(prompt_path)
+if not prompt_text:
+    print("prompt를 불러오지 못했습니다.")
 
 # FastAPI 앱 초기화
 app = FastAPI()
@@ -26,16 +30,39 @@ class QueryRequest(BaseModel):
 
 # 응답 생성 함수
 def generate_response(api_key, question):   
-    client = OpenAI(api_key=api_key)
-    model = "gpt-4o"
-    response = client.chat.completions.create(
-        model=model,
+    llm = ChatOpenAI(
+        model="gpt-4o",
         temperature=0.1,
-        messages=[{"role":"user", "content":question}],
+        api_key=api_key,
     )
     
-    print(response)
-    answer = response.choices[0].message.content
+    # 벡터스토어 생성
+    if not (os.path.exists(faiss_file) and os.path.exists(pkl_file)):
+        vectorstore = setup_vector_store(chunks_folder, index_path, api_key=api_key)
+    else:
+        vectorstore = FAISS.load_local(index_path, OpenAIEmbeddings(api_key=api_key))
+
+    retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+    
+    relevant_docs = retriever.get_relevant_documents(question)
+    context = "\n".join([doc.page_content for doc in relevant_docs])
+    max_context_length = 3000  # 검색된 문서의 최대 길이 제한
+    context = context[:max_context_length]
+    
+    # 프롬프트 생성
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                f"{prompt_text[:1000]}\n\n아래는 리트리버에서 가져온 데이터입니다:\n{context}"
+            ),
+            ("human", "{question}"),
+        ]
+    )
+
+    chain = {"question": RunnablePassthrough()} | prompt | llm
+    answer = chain.invoke(question).content
+
     return answer
 
 # 엔드포인트 정의
@@ -49,4 +76,5 @@ async def ask_question(request: QueryRequest):
 # 서버 실행
 if __name__ == "__main__":
     import uvicorn
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)
