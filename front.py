@@ -63,7 +63,7 @@ if menu == "채팅":
                 with st.chat_message("assistant"):
                     with st.spinner("Waiting for a response..."):
                         # FastAPI 서버로 POST 요청
-                        response = requests.post(API_URL, json={"question": question})
+                        response = requests.post(API_URL, json={"api_key": api_key, "question": question})
                         
                         if response.status_code == 200:
                             answer = response.json().get("answer", "No answer received.")
@@ -85,7 +85,7 @@ if menu == "채팅":
             with st.chat_message("assistant"):
                 with st.spinner("Waiting for a response..."):
                     # FastAPI 서버로 POST 요청
-                    response = requests.post(API_URL, json={"question": question})
+                    response = requests.post(API_URL, json={"api_key": api_key, "question": question})
                     
                     if response.status_code == 200:
                         answer = response.json().get("answer", "No answer received.")
