@@ -1,10 +1,10 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from langchain_openai import ChatOpenAI
-from langchain.vectorstores import FAISS
 from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.vectorstores import FAISS
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel
+from fastapi import FastAPI
 from model import setup_vector_store, load_prompt
 import os
 
