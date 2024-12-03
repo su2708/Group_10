@@ -56,6 +56,7 @@ if menu == "채팅":
             "법적/행정적 필수 절차"
         ]
 
+        st.empty()  # 답변이 2번 보이는 현상 방지
         for question in quick_questions:
             if st.sidebar.button(question):
                 # 사용자 메시지 처리
