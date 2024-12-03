@@ -135,6 +135,26 @@
 
 ---
 
+## 시스템 실행 방법
+### 1. front.py와 server.py를 각각 실행하는 경우 (이 방법을 권장)
+   1) 터미널을 2개로 분할, 혹은 2개의 터미널을 띄운다.
+   2) 한 쪽 터미널에 아래의 명령어를 입력한다.
+      ```bash
+      uvicorn server:app --reload
+      ```
+   3) 나머지 터미널에 아래의 명령어를 입력한다.
+      ```bash
+      streamlit run front.py
+      ```
+   4) 시스템을 종료하려면 각 터미널에 `ctrl+c`를 누른다.
+
+### 2. run.py를 실행하는 경우
+   1) 터미널에 아래의 명령어를 입력한다.
+      ```bash
+      python run.py
+      ```
+---
+
 ## 채팅 시나리오
 
 다음은 프로그램이 정상적으로 동작하는 것을 보여줄 수 있는 채팅 메시지 예시입니다.
@@ -299,7 +319,7 @@
 ### 선택한 모델과 선택 이유
 - 모델: OpenAI GPT
 - 이유: 자료를 보고 산출하는 역할도 수행해야 하기 때문에 MATH Benchmark 점수가 가장 높은 OpenAI GPT를 선택함
-- > [LLM 성능 비교](https://www.vellum.ai/llm-leaderboard)
+> [LLM 성능 비교](https://www.vellum.ai/llm-leaderboard)
 
 ---
 
